@@ -4,7 +4,7 @@ Parses LilyPond (.ly, .ily) files containing bass voice and figured bass symbols
 """
 
 import re
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Dict
 from dataclasses import dataclass
 from .generator import FiguredBassSymbol
 
@@ -59,7 +59,7 @@ class LilyPondParser:
         """
         self.default_octave = default_octave
 
-    def parse_file(self, filepath: str) -> Tuple[List[FiguredBassSymbol], Dict[str, any]]:
+    def parse_file(self, filepath: str) -> Tuple[List[FiguredBassSymbol], Dict[str, any]]: # type: ignore
         """
         Parse a LilyPond file containing figured bass notation.
 
@@ -74,7 +74,7 @@ class LilyPondParser:
 
         return self.parse_string(content)
 
-    def parse_string(self, content: str) -> Tuple[List[FiguredBassSymbol], Dict[str, any]]:
+    def parse_string(self, content: str) -> Tuple[List[FiguredBassSymbol], Dict[str, any]]: # type: ignore
         """
         Parse LilyPond content string.
 
