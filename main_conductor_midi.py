@@ -1,9 +1,8 @@
-"""Gesture Conductor with MIDI Figured Bass - Integrated Application."""
-
 import cv2
 import time
-import sys
+import argparse
 from pathlib import Path
+from typing import Optional, Tuple
 
 from src.gesture_conductor.conductor import ConductorGestureAnalyzer
 from src.gesture_conductor.visualiser import Visualizer, VisualizationConfig
@@ -11,6 +10,57 @@ from src.realization.lilypond_parser import parse_lilypond_file
 from src.realization.generator import FiguredBassRealizer
 from src.realization.midi_communicator import MidiCommunicator
 from src.realization.adaptive_midi_player import AdaptiveMidiPlayer
+
+
+def open_camera(camera_index: Optional[int] = None) -> Tuple[Optional[cv2.VideoCapture], int]:
+    """
+    Open camera with auto-detection of active non-black camera streams.
+
+    Args:
+        camera_index: Specific camera index to open, or None to auto-detect.
+
+    Returns:
+        Tuple of (cv2.VideoCapture, selected_camera_index)
+    """
+    if camera_index is not None:
+        cap = cv2.VideoCapture(camera_index)
+        if cap.isOpened():
+            for _ in range(5):
+                cap.read()
+                time.sleep(0.02)
+            return cap, camera_index
+        return None, camera_index
+
+    # Auto-detect camera index (on macOS, index 0 may be a black virtual/continuity device)
+    working_cap = None
+    selected_idx = 0
+
+    for idx in range(4):
+        cap = cv2.VideoCapture(idx)
+        if not cap.isOpened():
+            cap.release()
+            continue
+
+        has_content = False
+        for _ in range(8):
+            ret, frame = cap.read()
+            if ret and frame is not None and frame.mean() > 1.0:
+                has_content = True
+                break
+            time.sleep(0.03)
+
+        if has_content:
+            working_cap = cap
+            selected_idx = idx
+            break
+
+        cap.release()
+
+    if working_cap is None:
+        working_cap = cv2.VideoCapture(0)
+        selected_idx = 0
+
+    return working_cap, selected_idx
 
 
 def midi_to_note_name(midi_note: int) -> str:
@@ -23,14 +73,19 @@ def midi_to_note_name(midi_note: int) -> str:
 
 def main():
     """Run the integrated gesture conductor with MIDI figured bass."""
+    parser = argparse.ArgumentParser(description="Gesture Conductor with MIDI Figured Bass")
+    parser.add_argument("file", nargs="?", default=None, help="Path to figured bass .ily file")
+    parser.add_argument("--camera", "-c", type=int, default=None, help="Camera index to use (e.g. 0, 1)")
+    args = parser.parse_args()
+
     print("=" * 70)
     print("Gesture Conductor with MIDI Figured Bass")
     print("=" * 70)
     print("\nInitializing...")
 
     # Get figured bass file
-    if len(sys.argv) > 1:
-        figured_bass_file = sys.argv[1]
+    if args.file:
+        figured_bass_file = args.file
     else:
         figured_bass_file = Path(__file__).parent / "examples" / "figured_bass_long.ily"
     
@@ -111,14 +166,14 @@ def main():
     player.on_progression_complete = on_progression_complete
 
     # Open webcam
-    cap = cv2.VideoCapture(0)
+    cap, camera_idx = open_camera(args.camera)
 
-    if not cap.isOpened():
-        print("Error: Could not open webcam")
+    if cap is None or not cap.isOpened():
+        print(f"Error: Could not open webcam (index {camera_idx})")
         midi.close()
         return 1
 
-    print("\nWebcam opened successfully")
+    print(f"\nWebcam opened successfully (Camera {camera_idx})")
     print("\nControls:")
     print("  SPACE - Start/Pause playback")
     print("  R     - Reset to beginning")

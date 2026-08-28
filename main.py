@@ -2,12 +2,69 @@
 
 import cv2
 import time
+import argparse
+from typing import Optional, Tuple
 from src.gesture_conductor.conductor import ConductorGestureAnalyzer
 from src.gesture_conductor.visualiser import Visualizer, VisualizationConfig
 
 
+def open_camera(camera_index: Optional[int] = None) -> Tuple[Optional[cv2.VideoCapture], int]:
+    """
+    Open camera with auto-detection of active non-black camera streams.
+
+    Args:
+        camera_index: Specific camera index to open, or None to auto-detect.
+
+    Returns:
+        Tuple of (cv2.VideoCapture, selected_camera_index)
+    """
+    if camera_index is not None:
+        cap = cv2.VideoCapture(camera_index)
+        if cap.isOpened():
+            for _ in range(5):
+                cap.read()
+                time.sleep(0.02)
+            return cap, camera_index
+        return None, camera_index
+
+    # Auto-detect camera index (on macOS, index 0 may be a black virtual/continuity device)
+    working_cap = None
+    selected_idx = 0
+
+    for idx in range(4):
+        cap = cv2.VideoCapture(idx)
+        if not cap.isOpened():
+            cap.release()
+            continue
+
+        has_content = False
+        for _ in range(8):
+            ret, frame = cap.read()
+            if ret and frame is not None and frame.mean() > 1.0:
+                has_content = True
+                break
+            time.sleep(0.03)
+
+        if has_content:
+            working_cap = cap
+            selected_idx = idx
+            break
+
+        cap.release()
+
+    if working_cap is None:
+        working_cap = cv2.VideoCapture(0)
+        selected_idx = 0
+
+    return working_cap, selected_idx
+
+
 def main():
     """Run the gesture conductor application with full visualization."""
+    parser = argparse.ArgumentParser(description="Gesture Conductor - Real-time Conducting Analysis")
+    parser.add_argument("--camera", "-c", type=int, default=None, help="Camera index to use (e.g. 0, 1)")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("Gesture Conductor - Real-time Conducting Analysis")
     print("=" * 60)
@@ -37,13 +94,13 @@ def main():
     conductor = ConductorGestureAnalyzer(history_window=2.5)
 
     # Open webcam
-    cap = cv2.VideoCapture(0)
+    cap, camera_idx = open_camera(args.camera)
 
-    if not cap.isOpened():
-        print("Error: Could not open webcam")
+    if cap is None or not cap.isOpened():
+        print(f"Error: Could not open webcam (index {camera_idx})")
         return
 
-    print("\nWebcam opened successfully")
+    print(f"\nWebcam opened successfully (Camera {camera_idx})")
     print("\nControls:")
     print("  SPACE - Pause/Resume")
     print("  R     - Reset analyzer")

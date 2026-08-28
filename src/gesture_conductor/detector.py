@@ -4,7 +4,7 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-from typing import Optional, List
+from typing import Optional, List, Any
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -38,7 +38,8 @@ class GestureDetector:
         min_detection_confidence: float = 0.7,
         min_tracking_confidence: float = 0.5,
         max_num_hands: int = 1,
-        model_path: Optional[str] = None
+        model_path: Optional[str] = None,
+        delegate: Optional[Any] = None
     ):
         """
         Initialize the gesture detector.
@@ -48,6 +49,7 @@ class GestureDetector:
             min_tracking_confidence: Minimum confidence for hand tracking
             max_num_hands: Maximum number of hands to detect
             model_path: Optional path to custom model file (defaults to models/hand_landmarker.task)
+            delegate: Delegate to use (BaseOptions.Delegate.GPU or CPU). Defaults to GPU on macOS.
         """
         # Import MediaPipe task modules
         self.BaseOptions = mp.tasks.BaseOptions
@@ -73,19 +75,33 @@ class GestureDetector:
                     "Please provide a valid model_path or ensure models/hand_landmarker.task exists."
                 )
 
-        # Create options
-        base_options = self.BaseOptions(model_asset_path=model_path)
+        # Create options with GPU delegate (required on macOS Metal) or fallback
+        delegates_to_try = [delegate] if delegate is not None else [
+            self.BaseOptions.Delegate.GPU,
+            self.BaseOptions.Delegate.CPU
+        ]
 
-        options = self.HandLandmarkerOptions(
-            base_options=base_options,
-            running_mode=self.VisionRunningMode.LIVE_STREAM,
-            num_hands=max_num_hands,
-            min_hand_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=min_tracking_confidence,
-            result_callback=self._result_callback
-        )
+        self.landmarker = None
+        last_error = None
 
-        self.landmarker = self.HandLandmarker.create_from_options(options)
+        for d in delegates_to_try:
+            try:
+                base_options = self.BaseOptions(model_asset_path=model_path, delegate=d)
+                options = self.HandLandmarkerOptions(
+                    base_options=base_options,
+                    running_mode=self.VisionRunningMode.LIVE_STREAM,
+                    num_hands=max_num_hands,
+                    min_hand_detection_confidence=min_detection_confidence,
+                    min_tracking_confidence=min_tracking_confidence,
+                    result_callback=self._result_callback
+                )
+                self.landmarker = self.HandLandmarker.create_from_options(options)
+                break
+            except Exception as e:
+                last_error = e
+
+        if self.landmarker is None:
+            raise RuntimeError(f"Failed to initialize HandLandmarker: {last_error}")
 
     def _result_callback(
         self,
@@ -137,11 +153,11 @@ class GestureDetector:
         Returns:
             HandPosition if hand detected, None otherwise
         """
-        # Convert BGR to RGB
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Convert BGR to RGBA (SRGBA format required when using GPU/Metal delegate)
+        rgba_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
 
         # Create MediaPipe Image
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGBA, data=rgba_frame)
 
         # Convert timestamp to milliseconds
         timestamp_ms = int(timestamp * 1000)
@@ -171,20 +187,23 @@ class GestureDetector:
         annotated_frame = frame.copy()
 
         if self.last_result and self.last_result.hand_landmarks:
+            connections = getattr(mp.tasks.vision.HandLandmarksConnections, 'HAND_CONNECTIONS', None)
             for hand_landmarks in self.last_result.hand_landmarks:
                 # Convert normalized landmarks to pixel coordinates
                 height, width = frame.shape[:2]
 
                 # Draw connections
-                for connection in mp.solutions.hands.HAND_CONNECTIONS: # type: ignore
-                    start_idx, end_idx = connection
-                    start = hand_landmarks[start_idx]
-                    end = hand_landmarks[end_idx]
+                if connections:
+                    for connection in connections:
+                        start_idx = connection.start if hasattr(connection, 'start') else connection[0]
+                        end_idx = connection.end if hasattr(connection, 'end') else connection[1]
+                        start = hand_landmarks[start_idx]
+                        end = hand_landmarks[end_idx]
 
-                    start_point = (int(start.x * width), int(start.y * height))
-                    end_point = (int(end.x * width), int(end.y * height))
+                        start_point = (int(start.x * width), int(start.y * height))
+                        end_point = (int(end.x * width), int(end.y * height))
 
-                    cv2.line(annotated_frame, start_point, end_point, (0, 255, 0), 2)
+                        cv2.line(annotated_frame, start_point, end_point, (0, 255, 0), 2)
 
                 # Draw landmarks
                 for landmark in hand_landmarks:
