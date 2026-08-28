@@ -138,6 +138,22 @@ By default, the 4 SATB voices are mapped across MIDI channels:
 
 ---
 
+## Figured Bass Realization Engine
+
+The harmonization engine ([`src/realization/`](src/realization)) translates LilyPond figured bass scores into full 4-part SATB arrangements and streams them over MIDI:
+
+- **AST Parser ([`lilypond_parser.py`](src/realization/lilypond_parser.py))**: Extracts bass lines and `\figuremode` intervals (root `<5 3>`, 6th `<6>`, 6/4 `<6 4>`, 7ths `<7>`, `<6 5>`, `<4 3>`, `<4 2>`) with sharps, flats, and naturals.
+- **Voice Leading Realizer ([`generator.py`](src/realization/generator.py))**: Generates 4-part SATB harmony enforcing common-practice voice leading rules:
+  - Natural vocal ranges (Soprano C4–A5, Alto G3–D5, Tenor C3–A4, Bass E2–E4).
+  - Voice spacing limits (max 1 octave between adjacent upper voices).
+  - Strict prohibition of parallel fifths and parallel octaves.
+  - Common tone retention and contrary motion between soprano and bass.
+- **MIDI & Live Coding ([`midi_communicator.py`](src/realization/midi_communicator.py), [`tidal_exporter.py`](src/realization/tidal_exporter.py))**: Outputs separate MIDI voice streams to external DAWs/synths or exports patterns for TidalCycles.
+
+> For full API specifications, voice-leading rules, and custom voice routing, see the [Realization Subsystem Documentation](src/realization/README.md).
+
+---
+
 ## Project Structure
 
 ```
